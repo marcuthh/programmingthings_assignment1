@@ -1,4 +1,11 @@
-Programming "Things" Assignment 1 - Development log & instructions
+Programming "Things" Assignment 1 - Development log & report
+
+
+ -- PROJECT REPORT -- 
+
+
+
+ -- DEVELOPMENT LOG -- 
 
 13-Dec-17: Started assignment - XBee shield and sensor array were replaced by Pete, everything else working
 
@@ -37,3 +44,18 @@ Programming "Things" Assignment 1 - Development log & instructions
 10-Jan-18: Decision made to use a boolean value to indicate left and right for turns, rooms and corridors.
 	   Only ever two options available, so nothing is earned by using a struct or enum.
 	   As a rule for the whole project: true = left, false = right.
+
+11-Jan-18: Continued with the navigation across the track & registering of corridors and rooms.
+	   Run into some confusion when adding new corridor info, seeing as there are different routines for adding a corridor.
+	   Sub corridor is added to the vector from button presses, main corridors are added when a turn is completed.
+	   Current issue is that adding a sub corridor through GUI and then turning into it is duplicating corridor information in the vector, but with different id's.
+	   Also a small issue in that turning out of a sub corridor back into the main corridor is still adding a new one to the collection.
+	   Need a solution like searching collection for connecting corridor and flag this one as current.
+
+13-Jan-18: Workaround found for the issues relating to keeping track of current corridor and duplicate data.
+	   Use of a global flag can indicate between select-case statements if the current corridor has already been set before the zumo is instructed to turn,
+	   if the flag is set to true, the Corridor object is not pushed onto the vector, so the data cannot be duplicated.
+	   An attribute has also been added to the Corridor class that represents the id of the corridor that it is connected to (the one that it turned out of to turn into this one),
+	   when exiting a sub-corridor, code searches the vector for the connected Corridor object, rather than creating a new object in the collection.
+	   Version control finally set up and working. Issues from 06-Jan-18 worked around.
+	   Slightly defeats the point of using a repository at this stage, seeing as the bulk of the development has been done in the last week, but at least it's there.
