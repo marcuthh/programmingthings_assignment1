@@ -1,12 +1,13 @@
+//StandardCplusplus library from GitHub
 #include <StandardCplusplus.h>
 #include <system_configuration.h>
 #include <unwind-cxx.h>
 #include <utility.h>
-#include <NewPing.h>
+#include <vector>
+//other libraries
 #include <ZumoMotors.h>
 #include <QTRSensors.h>
 #include <ZumoReflectanceSensorArray.h>
-#include <vector>
 using namespace std;
 
 class Room {
@@ -59,6 +60,7 @@ class Corridor {
     bool subCorridor;
     int connectingCorridorId;
     bool onLeftTurn;
+    bool endReached;
 
   public:
     Corridor();
@@ -70,6 +72,8 @@ class Corridor {
     void setConnectingCorridorId(int id);
     bool isLeftTurn();
     void setTurnDirection(bool isLeft);
+    bool endHasBeenReached();
+    void setEndReached(bool reached);
 };
 Corridor::Corridor() {}
 int Corridor::getCorridorId() {
@@ -96,6 +100,12 @@ bool Corridor::isLeftTurn() {
 void Corridor::setTurnDirection(bool isLeft) {
   onLeftTurn = isLeft;
 }
+bool Corridor::endHasBeenReached() {
+  return endReached;
+}
+void Corridor::setEndReached(bool reached) {
+  endReached = reached;
+}
 
 // -- GLOBALS -- //
 // -- CONSTANTS -- //
@@ -116,11 +126,13 @@ void Corridor::setTurnDirection(bool isLeft) {
 #define _ROOM 'z'
 #define _SCAN 'x'
 #define _COMPLETE 'c'
+#define _END 'e'
+
 
 //constant strings to pass back to GUI
 #define EDGE_REACHED "Edge of track detected - turn required"
-#define EDGE_REACHED_LEFT_ONLY "Sub corridor exited - turn left to continue"
-#define EDGE_REACHED_RIGHT_ONLY "Sub corridor exited - turn right to continue"
+#define EDGE_REACHED_LEFT_ONLY "Back to sub corridor entrance - turn left to continue"
+#define EDGE_REACHED_RIGHT_ONLY "Back to sub corridor entrance - turn right to continue"
 #define OBJECT_DETECTED "Object detected in room "
 #define OBJECT_NOT_DETECTED "No objects detected in room "
 #define INVALID_COMMAND "Invalid command! That command cannot be used at this time"
@@ -138,14 +150,13 @@ void Corridor::setTurnDirection(bool isLeft) {
 #define DELAY_PAUSE 50
 #define DELAY_COMMAND 2
 //ultrasonic sensor values
-#define MAX_DISTANCE 1000 //equals about 17cm
+#define MAX_DISTANCE 17 //17cm scan range for detecting objects in room
 
 //number of sensors on Zumo
 #define NUM_SENSORS 6
 // -- CONSTANTS -- //
 
 //initialise sensor object
-NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE);
 ZumoMotors motors;
 unsigned int sensor_values[NUM_SENSORS];
 ZumoReflectanceSensorArray sensors(QTR_NO_EMITTER_PIN);
@@ -153,7 +164,7 @@ ZumoReflectanceSensorArray sensors(QTR_NO_EMITTER_PIN);
 //globals to control turn behaviour between commands
 bool turnRequired = false;
 bool turnedLeft = false; //technically initialised to say that first corridor is off a right turn, but will never be used for this corridor
-bool nextCorridorSelected = false;
+bool subCorridorEnded = false;
 
 //corridor and room collections
 vector<Room> rooms;
@@ -169,12 +180,17 @@ void setup()
   pinMode(LED_PIN, OUTPUT);
   Serial.begin(9600);
   establishContact();
+
+  //set up initial corridor
+  Corridor firstCorridor;
+  updateCurrentCorridor(firstCorridor, false, false);
 }
 void establishContact() {
   while (Serial.available() <= 0) {
     Serial.println("requestcontact");
     delay(DELAY_CONTACT);
   }
+  Serial.read();
 }
 // -- setup function and methods used only during setup -- //
 
@@ -185,14 +201,22 @@ void loop()
   if (Serial.available() > 0) {
     //read in command
     char command = (char) Serial.read();
+    //indicates a stop command through GUI rather than wall reached
+    bool commandedStop = false;
+
+    //local variable holds data on Zumo's current corridor
     Corridor currentCorridor;
+    //if it is null at this point, revert to using last corridor added to collection
+    if (currentCorridor.getCorridorId() <= 0) {
+      currentCorridor = corridors.back();
+    }
 
     switch (command) {
       //Zumo will attempt to go forward on either command
       case _FORWARD: case _COMPLETE:
         //'complete' case willflag that turn is finished and update the current corridor
         if (command == _COMPLETE) {
-          updateCurrentCorridor(currentCorridor, !turnRequired, turnedLeft);
+          //updateCurrentCorridor(currentCorridor, !turnRequired, turnedLeft);
           turnRequired = false;
         }
         //'forward' command will not work if a turn is still required
@@ -205,6 +229,7 @@ void loop()
           else {
             //hit when 'QUIT' command arrives, drops out of inner loop
             //calls stopMotors() by dropping out of loop
+            commandedStop = true;
             break;
           }
 
@@ -214,13 +239,41 @@ void loop()
 
         //exited loop
         //stop Zumo & wait for next command
-        if (!currentCorridor.isSubCorridor()) {
-          stopMotors(EDGE_REACHED);
-        } else {
-          if (currentCorridor.isLeftTurn()) {
-            stopMotors(EDGE_REACHED_LEFT_ONLY);
+        if (commandedStop) { //stopped through GUI command and not wall detection
+          stopMotors("");
+          commandedStop = false;
+        }
+        else { //stopped through wall detection
+          if (!currentCorridor.isSubCorridor()) { //while in main corridor
+            stopMotors(EDGE_REACHED);
           } else {
-            stopMotors(EDGE_REACHED_RIGHT_ONLY);
+            //still allow full set of turns while inside subCorridor
+            if (!subCorridorEnded) {
+              //end not yet flagged but zumo has stopped
+              //meaning this must be the end
+              //zumo must turn and head back to entrance
+              subCorridorEnded = true;
+              turnRequired = false;
+
+              stopMotors("End of corridor " + String(currentCorridor.getCorridorId()) + " reached. Please turn around and return to the main corridor.");
+              char turnDirection;
+              validateForTurnCommands(turnDirection);
+              
+              if (turnDirection == _LEFT) {
+                turnLeftIntoRoom();
+              } else {
+                turnRightIntoRoom();
+              }
+            }
+            else {
+              //back to sub corridor entrance
+              //can only turn to continue previous path
+              if (currentCorridor.isLeftTurn()) {
+                stopMotors(EDGE_REACHED_LEFT_ONLY);
+              } else {
+                stopMotors(EDGE_REACHED_RIGHT_ONLY);
+              }
+            }
           }
         }
 
@@ -237,10 +290,10 @@ void loop()
         detectNewRoom(currentCorridor); break;
       case _CORRIDOR:
         detectNewCorridor(currentCorridor); break;
-      case _SCAN:
-        scanRoomForObject(rooms.back()); break;
+      case _END:
+        outputFindings();
       default:
-        Serial.println(INVALID_COMMAND); break;
+        Serial.println("Invalid command! The command '" + String(command) + "' cannot be used at this time."); break;
     }
   }
 }
@@ -260,10 +313,13 @@ void turnLeft(Corridor currentCorridor) {
     motors.setSpeeds(-TURN_SPEED, TURN_SPEED);
     turnedLeft = true;
 
-    //update current corridor data if it hasn't already been handled through GUI
-    updateCurrentCorridorOnTurn(currentCorridor);
+    //update state of corridor and current collection
+    updateCurrentCorridor(currentCorridor, !turnRequired, turnedLeft);
 
     delay(DELAY_COMMAND);
+  }
+  else {
+    Serial.println("You can only turn right out of this corridor!");
   }
 }
 
@@ -274,16 +330,32 @@ void turnRight(Corridor currentCorridor) {
     motors.setSpeeds(TURN_SPEED, -TURN_SPEED);
     turnedLeft = false;
 
-    //update current corridor data if it hasn't already been handled through GUI
-    updateCurrentCorridorOnTurn(currentCorridor);
+    //update state of corridor and current collection
+    updateCurrentCorridor(currentCorridor, !turnRequired, turnedLeft);
 
     delay(DELAY_COMMAND);
   }
+  else {
+    Serial.println("You can only turn left out of this corridor!");
+  }
+}
+
+//simple turns not affected by corridor state
+void turnLeftIntoRoom() {
+  digitalWrite(LED_PIN, HIGH);
+  motors.setSpeeds(-TURN_SPEED, TURN_SPEED);
+  delay(DELAY_COMMAND);
+}
+//simple turns not affected by corridor state
+void turnRightIntoRoom() {
+  digitalWrite(LED_PIN, HIGH);
+  motors.setSpeeds(TURN_SPEED, -TURN_SPEED);
+  delay(DELAY_COMMAND);
 }
 
 void retreat() {
   digitalWrite(LED_PIN, HIGH);
-  motors.setSpeeds(REVERSE_SPEED, REVERSE_SPEED);
+  motors.setSpeeds(-REVERSE_SPEED, -REVERSE_SPEED);
   delay(DELAY_COMMAND);
   //cannot be left true if gone backwards from wall - must be allowed to go forwards to reach wall again
   turnRequired = false;
@@ -295,7 +367,11 @@ void stopMotors(String output) {
   if (!output.equals("")) {
     Serial.println(output);
     turnRequired = true;
+  } else {
+    Serial.println("Zumo stopped on command.");
+    turnRequired = false;
   }
+
   delay(DELAY_COMMAND);
 }
 // -- WASD & Q - motor control functions -- //
@@ -340,12 +416,12 @@ bool isClearPath() {
 
 bool isLeftTurnOnly(Corridor currentCorridor) {
   //zumo turned left into a sub corridor so can only turn left out
-  return currentCorridor.isSubCorridor() && currentCorridor.isLeftTurn();
+  return currentCorridor.isSubCorridor() && currentCorridor.isLeftTurn() && subCorridorEnded;
 }
 
 bool isRightTurnOnly(Corridor currentCorridor) {
   //zumo turned right into a sub corridor so can only turn right out
-  return currentCorridor.isSubCorridor() && !currentCorridor.isLeftTurn();
+  return currentCorridor.isSubCorridor() && !currentCorridor.isLeftTurn() && subCorridorEnded;
 }
 
 //idea taken from Arduino Forum post for similar issue
@@ -375,9 +451,10 @@ void reverseAndTurn(int sensorValue, int oppositeSensorValue, bool goLeft) {
 
 // -- object detection methods -- //
 void scanRoomForObject(Room room) {
+  Serial.println("Scanning room " + String(room.getRoomId()) + " (corridor " + String(room.getCorridorId()) + ")...");
   //use for loop to perform sweep motion
   //so sonar can see the whole room
-  for (int i = 0; i < 80; i++)
+  for (int i = 0; i < 10; i++) //maximum of 10 sweeps before concluded that no object found
   {
     if (!room.containsObject()) {
       if ((i > 10 && i <= 30) || (i > 50 && i <= 70)) {
@@ -390,16 +467,36 @@ void scanRoomForObject(Room room) {
         //perform object detect routine at every pause in turn
         checkForObject(room);
       }
-
-      delay(DELAY_PAUSE);
     }
-
-    //sweep completed
-    //output a message to confirm that room is empty
-    if (!room.containsObject()) {
-      Serial.println(OBJECT_NOT_DETECTED + String(room.getRoomId()) + " (corridor " + String(room.getCorridorId()) + ")");
+    else {
+      break; //exit for loop
     }
+    stopMotors(OBJECT_DETECTED + String(room.getRoomId()) + " (corridor " + String(room.getCorridorId()) + ")");
+    delay(DELAY_PAUSE);
   }
+
+  //sweep completed
+  //output a message to confirm that room is empty
+  if (!room.containsObject()) {
+    stopMotors(OBJECT_NOT_DETECTED + String(room.getRoomId()) + " (corridor " + String(room.getCorridorId()) + ")");
+  }
+  //pause to display message for long enough
+  delay(2000);
+
+  //turn zumo back into corridor
+  if (room.isOnLeftOfCorridor()) {
+    Serial.println("Scan of " + String(room.getRoomId()) + " completed. Please turn right back into the corridor.");
+    validateForCommand(_RIGHT, "Right");
+    turnRightIntoRoom(); //not the cleanest, but effectively undoes the simple turn into the room
+  }
+  else {
+    Serial.println("Scan of " + String(room.getRoomId()) + " completed. Please turn left back into the corridor.");
+    validateForCommand(_LEFT, "Left");
+    turnLeftIntoRoom(); //not the cleanest, but effectively undoes the simple turn into the room
+  }
+  Serial.println("Click 'Stop' when you are facing back into corridor " + String(room.getCorridorId()));
+  validateForCommand(_STOP, "Stop");
+  stopMotors("You can now continue your search");
 }
 
 void checkForObject(Room room) {
@@ -407,12 +504,45 @@ void checkForObject(Room room) {
   //object found within max range
   if (objectDetected()) {
     room.setContainsObject(true);
-    Serial.println(OBJECT_DETECTED + String(room.getRoomId()) + " (corridor " + String(room.getCorridorId()) + ")");
   }
 }
 
 bool objectDetected() {
-  return sonar.ping_cm() > 0;
+  //attempt with NewPing library got nothing - constantly returned 0
+  //reverted back to code from ObjectDetect example - where this code is borrowed from
+
+  // establish variables for duration of the ping,
+  // and the distance result in inches and centimeters:
+  long duration, dist;
+
+  // The sensor is triggered by a HIGH pulse of 10 or more microseconds.
+  // Give a short LOW pulse beforehand to ensure a clean HIGH pulse:
+  pinMode(TRIGGER_PIN, OUTPUT);
+  digitalWrite(TRIGGER_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIGGER_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIGGER_PIN, LOW);
+
+  // Read the signal from the sensor: a HIGH pulse whose
+  // duration is the time (in microseconds) from the sending
+  // of the ping to the reception of its echo off of an object.
+  pinMode(ECHO_PIN, INPUT);
+  duration = pulseIn(ECHO_PIN, HIGH);
+
+  // convert the time into a distance
+  dist = microsecondsToCentimeters(duration);
+
+  return dist < MAX_DISTANCE;
+}
+
+long microsecondsToCentimeters(long microseconds) {
+  //borrowed method from ObjectDetect example
+
+  // The speed of sound is 340 m/s or 29 microseconds per centimeter.
+  // The ping travels out and back, so to find the distance of the
+  // object we take half of the distance travelled.
+  return microseconds / 29 / 2;
 }
 // -- object detection methods -- //
 
@@ -420,19 +550,51 @@ bool objectDetected() {
 void detectNewRoom(Corridor currentCorridor) {
   Room room;
   //set values to empty object
-  room.setRoomId(roomCount++);
+  room.setRoomId(roomCount += 1);
   room.setCorridorId(currentCorridor.getCorridorId());
+  room.setContainsObject(false);
 
   //request and read in user input
   Serial.println("Room " + String(room.getRoomId()) + " discovered on corridor " + String(room.getCorridorId()) +
                  "; is room " + String(room.getRoomId()) + " on the left-hand or right-hand side of the corridor?");
-  
 
-  room.setSideOfCorridor(isOnLeftHandSide());
-  //hasObject value will be assigned during '_SCAN' routine
+  bool isLeft = isOnLeftHandSide();
+  room.setSideOfCorridor(isLeft);
+
+  if (isLeft) {
+    Serial.println("Please turn left");
+    validateForCommand(_LEFT, "Left");
+    //valid input - exit loop
+    turnLeftIntoRoom();
+
+    Serial.println("Click 'Stop' when you are facing into room " + String(room.getRoomId()));
+    validateForCommand(_STOP, "Stop");
+    //valid input - exit loop
+    //ask user to detect objects in room
+    stopMotors("Click 'Scan room' to check room " + String(room.getRoomId()) + " for objects");
+
+    validateForCommand(_SCAN, "Scan room");
+  }
+  else {
+    Serial.println("Please turn right");
+    validateForCommand(_RIGHT, "Right");
+    //valid input - exit loop
+    turnRightIntoRoom();
+
+    Serial.println("Click 'Stop' when you are facing into room " + String(room.getRoomId()));
+    validateForCommand(_STOP, "Stop");
+    //valid input - exit loop
+    //ask user to detect objects in room
+    stopMotors("Click 'Scan room' to check room " + String(room.getRoomId()) + " for objects");
+
+    validateForCommand(_SCAN, "Scan room");
+  }
+  //valid input - exit loop
+  //perform scan of room
+  scanRoomForObject(room);
 
   //added as last item in collection
-  //'SCAN' routine will 
+  //'SCAN' routine will
   rooms.push_back(room);
 }
 
@@ -440,25 +602,60 @@ void detectNewCorridor(Corridor currentCorridor) {
   //request and read in user input
   Serial.println("Is the entrance to the new corridor on the left-hand or right-hand side of corridor "
                  + String(currentCorridor.getCorridorId()) + "?");
-  char side;
+
+  //flag corridor as being on side indicated by user
+  //left is true, right is false
+  turnedLeft = isOnLeftHandSide();
+  if (turnedLeft) {
+    Serial.println("Please turn left");
+    validateForCommand(_LEFT, "Left");
+    //valid input - exit loop
+    //turn zumo left into corridor
+    turnLeft(currentCorridor);
+  }
+  else {
+    Serial.println("Please turn right");
+    validateForCommand(_RIGHT, "Right");
+    //valid input - exit loop
+    //turn zumo right into corridor
+    turnRight(currentCorridor);
+  }
+}
+
+//generic validation that does not allow code to continue until the required button has been pressed
+void validateForCommand(char requiredCommand, String buttonLabel) {
+  char subCommand;
+  //wait for and read in user input
   while (Serial.available() <= 0) {
     delay(DELAY_CONTACT);
   }
   if (Serial.available() > 0) {
-    side = Serial.read();
+    subCommand = Serial.read();
   }
 
-  //cannot progress until one of the two valid options has been clicked
-  while (!(side == _ON_LEFT || side == _ON_RIGHT)) {
-    Serial.println("Error! Please click 'On left' or 'On right'");
-    side = (char) Serial.read();
+  //cannot progress until valid option has been clicked
+  while (!subCommand == requiredCommand) {
+    Serial.println("Error! Please click '" + buttonLabel + "'");
+    subCommand = (char) Serial.read();
   }
-  //flag corridor as being on side indicated by user
-  //left is true, right is false
-  turnedLeft = isOnLeftHandSide();
-  updateCurrentCorridor(currentCorridor, !turnRequired, turnedLeft);
-  //set flag to true, and avoid duplicate corridor object being added to collection during turn method
-  nextCorridorSelected = true;
+}
+
+//hard-coded alternative to validateForCommands() that will allow a turn in either direction
+//if any bigger, array of accepted commands could be used, but that gets a bit heavy for the purposes of this
+void validateForTurnCommands(char turnDirection) {
+  //wait for and read in user input
+  while (Serial.available() <= 0) {
+    delay(DELAY_CONTACT);
+  }
+  if (Serial.available() > 0) {
+    turnDirection = Serial.read();
+  }
+
+  //cannot progress until valid option has been clicked
+  while (!(turnDirection == _LEFT || turnDirection == _RIGHT)) {
+    Serial.println("Error! Please click 'Left' or 'Right'");
+    turnDirection = (char) Serial.read();
+  }
 }
 
 bool isOnLeftHandSide() {
@@ -487,33 +684,13 @@ void updateCurrentCorridor(Corridor currentCorridor, bool isSubCorridor, bool is
   //set values using parameter values
   //apart from corridor id being set using unique global
   currentCorridor.setConnectingCorridorId(currentCorridor.getCorridorId());
-  currentCorridor.setCorridorId(corridorCount++);
+  currentCorridor.setCorridorId(corridorCount += 1);
   currentCorridor.setSubCorridor(isSubCorridor);
   currentCorridor.setTurnDirection(isOnLeft);
+  subCorridorEnded = false //false until wall detected
 
   //add corridor to collection
   corridors.push_back(currentCorridor);
-}
-
-void updateCurrentCorridorOnTurn(Corridor currentCorridor) {
-  //add new corridor data to list if it hasn't already been entered through GUI buttons (case _CORRIDOR + _ON_LEFT/_ON_RIGHT)
-  if (!nextCorridorSelected) {
-    //Zumo has not come out of a sub-corridor
-    //is entering a new main corridor
-    if (!currentCorridor.isSubCorridor()) {
-      updateCurrentCorridor(currentCorridor, turnedLeft, !turnRequired);
-    }
-    //Zumo has exited sub corridor
-    //re-joining the connected main corridor
-    else {
-      //set corridor that is being re-entered as current corridor
-      currentCorridor = getCorridorById(currentCorridor.getConnectingCorridorId());
-    }
-  }
-  else {
-    //turn to false so does not affect logging of subsequent turns
-    nextCorridorSelected = false;
-  }
 }
 
 Corridor getCorridorById(int id) {
@@ -527,6 +704,25 @@ Corridor getCorridorById(int id) {
     //return empty object
     //can have id checked for > 0
     return Corridor();
+  }
+}
+
+void outputFindings() {
+  String outputStr;
+  outputStr = "Total rooms detected and scanned: " + String(rooms.size() + "\n");
+  if (rooms.size() > 0) {
+    int objectCount = 0;
+    for (int i = 0; i < rooms.size(); i++) {
+      outputStr += "Room " + String(rooms.at(i).getRoomId()) + " (corridor " + String(rooms.at(i).getCorridorId()) + "): ";
+      if (rooms.at(i).containsObject()) {
+        outputStr += "object found\n";
+        objectCount++;
+      }
+      else {
+        outputStr += "no object found\n";
+      }
+    }
+    outputStr += "Number of rooms containing an object: " + String(objectCount);
   }
 }
 // -- room and corridor detection and collection management -- //

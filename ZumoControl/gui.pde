@@ -14,17 +14,6 @@
  * =========================================================
  */
  
-final char _FORWARD = 'w';
-final char _LEFT = 'a';
-final char _BACK = 's';
-final char _RIGHT = 'd';
-final char _STOP = 'q';
-final char _ON_LEFT = 'l';
-final char _ON_RIGHT = 'r';
-final char _CORRIDOR = 'y';
-final char _ROOM = 'z';
-final char _SCAN = 'x';
-final char _COMPLETE = 'f';
 
 public void btnLeft_click(GButton source, GEvent event) { //_CODE_:btnLeft:499964:
   com4.write(_LEFT);
@@ -70,6 +59,14 @@ public void textarea2_change1(GTextArea source, GEvent event) { //_CODE_:txtOutp
   println("txtOutput - GTextArea >> GEvent." + event + " @ " + millis());
 } //_CODE_:txtOutput:948000:
 
+public void button2_click1(GButton source, GEvent event) { //_CODE_:btnComplete:757894:
+  com4.write(_COMPLETE);
+} //_CODE_:btnComplete:757894:
+
+public void btnEndResults_click(GButton source, GEvent event) { //_CODE_:btnEndResults:911564:
+  com4.write(_END);
+} //_CODE_:btnEndResults:911564:
+
 
 
 // Create all the GUI controls. 
@@ -82,7 +79,7 @@ public void createGUI(){
   btnLeft = new GButton(this, 91, 145, 80, 30);
   btnLeft.setText("Left");
   btnLeft.addEventHandler(this, "btnLeft_click");
-  btnForward = new GButton(this, 187, 104, 80, 30);
+  btnForward = new GButton(this, 139, 103, 80, 30);
   btnForward.setText("Forward");
   btnForward.addEventHandler(this, "btnForward_click");
   btnRight = new GButton(this, 278, 145, 80, 30);
@@ -91,7 +88,7 @@ public void createGUI(){
   btnBack = new GButton(this, 185, 188, 80, 30);
   btnBack.setText("Back");
   btnBack.addEventHandler(this, "btnBack_click");
-  btnStop = new GButton(this, 186, 145, 80, 30);
+  btnStop = new GButton(this, 185, 144, 80, 30);
   btnStop.setText("Stop");
   btnStop.addEventHandler(this, "btnStop_click");
   btnRoom = new GButton(this, 185, 265, 80, 30);
@@ -116,6 +113,12 @@ public void createGUI(){
   lblOutput.setTextAlign(GAlign.CENTER, GAlign.MIDDLE);
   lblOutput.setText("Arduino says:");
   lblOutput.setOpaque(false);
+  btnComplete = new GButton(this, 233, 103, 80, 30);
+  btnComplete.setText("Complete");
+  btnComplete.addEventHandler(this, "button2_click1");
+  btnEndResults = new GButton(this, 462, 221, 200, 40);
+  btnEndResults.setText("End Course and View Findings");
+  btnEndResults.addEventHandler(this, "btnEndResults_click");
 }
 
 // Variable declarations 
@@ -132,3 +135,5 @@ GButton btnOnLeft;
 GButton btnOnRight; 
 GTextArea txtOutput; 
 GLabel lblOutput; 
+GButton btnComplete; 
+GButton btnEndResults; 

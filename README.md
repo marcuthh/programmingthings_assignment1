@@ -1,8 +1,4 @@
-Programming "Things" Assignment 1 - Development log & report
-
-
- -- PROJECT REPORT -- 
-
+Programming "Things" Assignment 1 README - Development log
 
 
  -- DEVELOPMENT LOG -- 
@@ -52,10 +48,28 @@ Programming "Things" Assignment 1 - Development log & report
 	   Also a small issue in that turning out of a sub corridor back into the main corridor is still adding a new one to the collection.
 	   Need a solution like searching collection for connecting corridor and flag this one as current.
 
-13-Jan-18: Workaround found for the issues relating to keeping track of current corridor and duplicate data.
+13-Jan-18: Version control finally set up and working. Issues from 06-Jan-18 worked around.
+	   Slightly defeats the point of using a repository at this stage, seeing as the bulk of the development has been done in the last week, but at least it's there.
+	   Workaround found for the issues relating to keeping track of current corridor and duplicate data.
 	   Use of a global flag can indicate between select-case statements if the current corridor has already been set before the zumo is instructed to turn,
 	   if the flag is set to true, the Corridor object is not pushed onto the vector, so the data cannot be duplicated.
 	   An attribute has also been added to the Corridor class that represents the id of the corridor that it is connected to (the one that it turned out of to turn into this one),
 	   when exiting a sub-corridor, code searches the vector for the connected Corridor object, rather than creating a new object in the collection.
-	   Version control finally set up and working. Issues from 06-Jan-18 worked around.
-	   Slightly defeats the point of using a repository at this stage, seeing as the bulk of the development has been done in the last week, but at least it's there.
+	   This latest update has also fixed a previous bug that was sometimes allowing the zumo to turn back the way it came out of a sub corridor, instead of continuing on track.
+
+14-Jan-18: Changed an awful lot about the way the program is structured. Slimmed down the switch-case statement to only take a few commands from inside the general loop.
+	   The loop() function now primarily takes WASD commands and the identification of new corridor/room.
+	   Once methods such as detectNewCorridor() or detectNewRoom() are called, they execute their own while loops that wait for specific commands to control the next steps.
+	   Now, once 'Identify New Room/Corridor' has been called, you have to go through with the whole process of flagging it left/right, turning and entering (and scanning, for room).
+	   Object detection reverted back to using code borrowed from ObjectDetect tutorial, NewPing library was causing too many issues on final test track.
+	   Object detection can still be a little bit inconsistent, and can sometimes output "object found!", immediately followed by "object not found!".
+           There doesn't seem to be a clear fix at this point. I can see that the value is getting set correctly, but the loop is continuing to execute until the end.
+	   Navigation of sub-corridor now completely works. I tried using a class attribute to indicate whether the end of the corridor had been reached, but it returned false at all times.
+	   Had to swap it out for a global variable that sets as 'true' when the Zumo first hits a wall inside the sub corridor (not ideal as it assumes no turn inside sub corridor),
+	   After that, the next wall the Zumo reaches is assumed to be the entrance back to the main corridor and it will force a turn in the appropriate direction.
+	   Finally, added a button to display final findings at the end of the track. Works coherently at times but can be inconsistent and sometimes gives an "Invalid command!" response.
+	   Have to live with it at this point, not enough time for diving into fixes.
+           Also didn't have time to separate Corridor and Room classes into separate files and import them. Not an issue in terms of functionality but would have been better practice.
+
+15-Jan-18: 00:30am - video of final run. Only one camera available so shows Zumo navigating the track but not able to show the GUI at the same time
+	   09:20 - check README entries and final check of code.
